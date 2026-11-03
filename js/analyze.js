@@ -286,3 +286,97 @@ export function manualYard(widthM, depthM, houseSide = 'top') {
   };
   return finishModel(model, new Uint8Array(n));
 }
+
+// ---- hand corrections: mark, split and merge scanned items -------------------
+
+/** Recompute a scanned item's measured box from its cells and put it back at its scanned spot. */
+export function refreshFromCells(model, it) {
+  const { cols, cell, heightTop, canopy } = model;
+  let i0 = Infinity, j0 = Infinity, i1 = -Infinity, j1 = -Infinity, maxH = 0;
+  for (const c of it.cells) {
+    const i = c % cols, j = (c - i) / cols;
+    if (i < i0) i0 = i; if (i > i1) i1 = i;
+    if (j < j0) j0 = j; if (j > j1) j1 = j;
+    if (heightTop[c] > maxH && !canopy[c]) maxH = heightTop[c];
+  }
+  it.w = round2((i1 - i0 + 1) * cell);
+  it.d = round2((j1 - j0 + 1) * cell);
+  it.x = round2((i0 + i1 + 1) / 2 * cell);
+  it.z = round2((j0 + j1 + 1) / 2 * cell);
+  it.rot = 0;
+  if (maxH >= 0.15) it.h = round2(maxH);
+  else it.h = it.h && it.h >= 0.15 ? it.h : 0.5; // flat in the scan: assume knee height
+  it.home = { x: it.x, z: it.z, rot: 0 };
+  delete it.stats;
+  return it;
+}
+
+/**
+ * Turn a box drawn on the plan into a scanned item. Whatever stands up inside the box is
+ * used; if nothing does (a low bench read as ground) the whole box is used. Cells that
+ * belonged to other scanned items move to the new one, which is how a detection is split.
+ * Returns { item, removed: ids of items left empty, touched: ids of items that lost cells } or null.
+ */
+export function markRegion(model, items, rect) {
+  const { cols, rows, cell, covered, heightTop } = model;
+  const i0 = Math.max(0, Math.floor(Math.min(rect.x0, rect.x1) / cell)), i1 = Math.min(cols, Math.ceil(Math.max(rect.x0, rect.x1) / cell));
+  const j0 = Math.max(0, Math.floor(Math.min(rect.z0, rect.z1) / cell)), j1 = Math.min(rows, Math.ceil(Math.max(rect.z0, rect.z1) / cell));
+  if (i1 - i0 < 1 || j1 - j0 < 1) return null;
+  const all = [], standing = [];
+  for (let j = j0; j < j1; j++)
+    for (let i = i0; i < i1; i++) {
+      const k = j * cols + i;
+      if (!covered[k]) continue;
+      all.push(k);
+      // tree canopy overhead is walk-under space, not part of the thing being marked
+      if (heightTop[k] >= 0.15 && !model.canopy[k]) standing.push(k);
+    }
+  const chosen = standing.length >= Math.max(4, all.length * 0.02) ? standing : all;
+  if (!chosen.length) return null;
+  const take = new Set(chosen);
+  const removed = [], touched = [];
+  let fromFixed = 0, fromAny = 0;
+  for (const it of items) {
+    if (it.origin !== 'scanned' || !it.cells) continue;
+    const before = it.cells.length;
+    const keep = it.cells.filter((c) => !take.has(c));
+    if (keep.length === before) continue;
+    const moved = before - keep.length;
+    fromAny += moved;
+    if (it.fixed) fromFixed += moved;
+    if (keep.length) { it.cells = keep; refreshFromCells(model, it); touched.push(it.id); }
+    else removed.push(it.id);
+  }
+  const item = refreshFromCells(model, {
+    id: newId('mk'), name: 'Marked item', autoName: true, scanType: 'marked', kind: 'scanned',
+    origin: 'scanned', marked: true, fixed: fromAny > 0 && fromFixed > fromAny / 2, locked: false,
+    shape: 'rect', clearance: 0.5, cells: chosen, rot: 0, h: standing.length ? 0 : 0.5,
+  });
+  if (item.fixed) item.clearance = 0;
+  return { item, removed, touched, flat: chosen === all && !standing.length };
+}
+
+/** Join b into a (both scanned). Returns a. */
+export function mergeItems(model, a, b) {
+  const set = new Set(a.cells);
+  for (const c of b.cells) set.add(c);
+  a.cells = [...set];
+  if (b.h > a.h) a.h = b.h;
+  return refreshFromCells(model, a);
+}
+
+/** Scanned items within `maxGap` meters of `it`, nearest first. */
+export function nearbyScanned(items, it, maxGap = 2) {
+  const box = (o) => ({ x0: o.home?.x ?? o.x, z0: o.home?.z ?? o.z, w: o.w, d: o.d });
+  const a = box(it);
+  return items
+    .filter((o) => o !== it && o.origin === 'scanned' && o.cells?.length)
+    .map((o) => {
+      const b = box(o);
+      const dx = Math.max(0, Math.abs(a.x0 - b.x0) - (a.w + b.w) / 2);
+      const dz = Math.max(0, Math.abs(a.z0 - b.z0) - (a.d + b.d) / 2);
+      return { item: o, gap: Math.hypot(dx, dz) };
+    })
+    .filter((o) => o.gap <= maxGap)
+    .sort((p, q) => p.gap - q.gap);
+}

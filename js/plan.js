@@ -131,7 +131,8 @@ export class PlanView {
   }
 
   fixedLayer(model, items) {
-    const key = items.filter((it) => it.origin === 'scanned' && it.fixed).map((it) => it.id).join('|') + this.colors.fixed;
+    // owners change when items are marked, split, merged or switch between fixed and movable
+    const key = items.filter((it) => it.origin === 'scanned').map((it) => `${it.id}:${it.fixed ? 1 : 0}:${it.cells?.length || 0}`).join('|') + this.colors.fixed;
     if (this.layerCache.fixedKey === key && this.layerCache.fixed) return this.layerCache.fixed;
     const owner = new Int32Array(model.cols * model.rows).fill(-1);
     items.forEach((it, k) => { if (it.origin === 'scanned' && it.cells) for (const c of it.cells) owner[c] = k; });
@@ -204,6 +205,7 @@ export class PlanView {
     for (const it of st.items) if (!(it.origin === 'scanned' && it.fixed)) this.drawItem(g, it, st, px);
     if (prop) this.drawProposal(g, st, prop, px);
     if (this.measure) this.drawMeasure(g, this.measure, st.units, px);
+    if (this.markBox) this.drawMarkBox(g, this.markBox, st.units, px);
   }
 
   drawGrid(g, m, units, px) {
@@ -453,6 +455,28 @@ export class PlanView {
     });
   }
 
+  drawMarkBox(g, m, units, px) {
+    const x0 = Math.min(m.a.x, m.b.x), z0 = Math.min(m.a.z, m.b.z);
+    const w = Math.abs(m.b.x - m.a.x), d = Math.abs(m.b.z - m.a.z);
+    g.save();
+    g.fillStyle = this.colors.accent;
+    g.globalAlpha = 0.15;
+    g.fillRect(x0, z0, w, d);
+    g.globalAlpha = 1;
+    g.strokeStyle = this.colors.accent;
+    g.lineWidth = 2 * px;
+    g.setLineDash([6 * px, 4 * px]);
+    g.strokeRect(x0, z0, w, d);
+    g.setLineDash([]);
+    if (w > 0.2 && d > 0.2) {
+      g.font = `600 ${11 * px}px ${css('--font-mono')}`;
+      g.textAlign = 'left'; g.textBaseline = 'bottom';
+      g.fillStyle = this.colors.accent;
+      g.fillText(fmtDims(w, d, units), x0, z0 - 3 * px);
+    }
+    g.restore();
+  }
+
   drawMeasure(g, m, units, px) {
     g.save();
     g.strokeStyle = this.colors.accent;
@@ -525,6 +549,7 @@ export class PlanView {
       const w = this.toWorld(p.x, p.y);
       if (this.tool === 'measure') { this.measure = { a: w, b: w }; this.drag = { type: 'measure' }; this.invalidate(); return; }
       if (this.tool === 'door') { this.hooks.onDoor(w); return; }
+      if (this.tool === 'mark') { this.markBox = { a: w, b: w }; this.drag = { type: 'mark' }; this.invalidate(); return; }
       const it = this.hit(w);
       this.hooks.onSelect(it ? it.id : null);
       if (it && !it.fixed && !it.locked) this.drag = { type: 'item', item: it, dx: it.x - w.x, dz: it.z - w.z, moved: false };
@@ -545,6 +570,7 @@ export class PlanView {
       }
       const w = this.toWorld(p.x, p.y);
       if (d.type === 'measure') { this.measure.b = w; this.invalidate(); }
+      else if (d.type === 'mark') { this.markBox.b = w; this.invalidate(); }
       else if (d.type === 'item') {
         const snap = this.hooks.getState().units === 'metric' ? 0.05 : 0.0254 * 3;
         d.item.x = Math.round((w.x + d.dx) / snap) * snap;
@@ -562,6 +588,7 @@ export class PlanView {
       const d = this.drag;
       if (d?.type === 'item' && d.moved) this.hooks.onMoveEnd(d.item);
       if (d?.type === 'measure') this.hooks.onMeasure(this.measure);
+      if (d?.type === 'mark') { const b = this.markBox; this.markBox = null; this.invalidate(); this.hooks.onMark(b); }
       if (this.pointers.size < 2) this.drag = d?.type === 'pinch' ? null : (this.pointers.size ? this.drag : null);
     };
     cv.addEventListener('pointerup', end);

@@ -12,6 +12,16 @@ It runs entirely in the browser. Your scan never leaves your device.
 - **Finds what is already there.** Trees, sheds, the house wall, fences, tables and grills
   are detected from their height and shape. You can rename any of them and mark each one
   *Fixed* (trees, sheds) or *Movable* (a table, a grill).
+- **Lets you correct the scan.**
+  - *Mark an item:* drag a box on the plan around something the scan missed. Whatever stands up
+    inside the box becomes the item, measured from the scan; if nothing does (a low bench read as
+    ground), the box itself is used.
+  - *Split:* mark a box inside an existing detection to cut that part off as its own item
+    (a chair pulled out from a table).
+  - *Merge:* select an item and merge it with a nearby one when one thing was detected in pieces.
+  - *Identify with Claude* (inside Claude): sends Claude a top-down crop of the aerial view with
+    the item outlined, plus its measured size and height, and suggests a type you can accept.
+    *Identify all* labels everything in the list in one go, skipping things you typed yourself.
 - **Suggests a layout.** The planner moves every movable piece (things already in the
   yard and new furniture you add) so that:
   - fire pits and grills stay 10 ft from the house and trees, with open sky overhead
@@ -79,6 +89,7 @@ self-contained page used to publish the app as a Claude artifact.
 | `js/analyze.js` | Cleans the ground surface, finds obstacles and canopy, groups obstacles into features and labels them. |
 | `js/optimizer.js` | Scores a layout (hard limits, clearances, placement rules, walkway reachability, open lawn size) and searches with a greedy seed followed by simulated annealing. |
 | `js/catalog.js` | Furniture and plant sizes, clearances, placement rules, and feature types. |
+| `js/identify.js` | Aerial-view crops and the prompt for Identify with Claude. |
 | `js/importer.js` | Reads pasted sizes, product specs and bookmark output; the bookmark itself. |
 | `js/notes.js` | Writes the plain-language suggestions and the summary for Claude. |
 | `js/plan.js`, `js/view3d.js`, `js/looks.js` | 2D plan, 3D preview, finishes and models. |

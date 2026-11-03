@@ -1,7 +1,8 @@
 // Yard Maker: app state and UI wiring.
 import { CATALOG, CATALOG_BY_KIND, CATEGORIES, FEATURE_BY_KIND, FIXED_KINDS, categoryOf, typeGroups, kindName } from './catalog.js';
 import { parseProduct, claudePrompt, fromClaude, BOOKMARKLET } from './importer.js';
-import { manualYard, yardStats, newId } from './analyze.js';
+import { manualYard, yardStats, newId, markRegion, mergeItems, nearbyScanned } from './analyze.js';
+import { cropItem, identifyPrompt, readGuess } from './identify.js';
 import { sampleYard, drawSampleOrtho } from './sample.js';
 import { optimize, buildSite, evaluate, footprint } from './optimizer.js';
 import { layoutNotes, openText, claudeSummary } from './notes.js';
@@ -29,8 +30,10 @@ const plan = new PlanView($('plan'), {
   onMove: () => { renderInspector(); },
   onMoveEnd: () => { dropProposal(); changed(); },
   onMeasure: (m) => showCalib(m),
+  onMark: (b) => markBox(b),
   onDoor: (w) => { state.door = w; setTool('select'); dropProposal(); changed(); toast('Door set. Walkways are checked from here.'); },
 });
+window.__plan = plan;
 
 // ------------------------------------------------------------------ helpers
 
@@ -239,12 +242,12 @@ let downloadsApi = null; // the Claude page's save dialog, when available
 /** Save a file: through Claude's save dialog inside Claude, else a normal download. */
 async function saveFile(name, data) {
   const blob = typeof data === 'string' && data.startsWith('data:') ? dataUrlBlob(data) : new Blob([data]);
-  if (embedded) {
-    if (!downloadsApi) { toast('Saving files is not available here.'); return; }
+  if (downloadsApi) {
     try { await downloadsApi.save({ filename: name, data: blob }); toast('Saved.'); }
     catch (e) { if (e?.code !== 'declined') toast('That file could not be saved here.'); }
     return;
   }
+  if (embedded) { toast('Saving files is not available here.'); return; }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -296,6 +299,7 @@ function renderStats() {
 
 function renderExisting() {
   const list = state.items.filter((it) => it.origin === 'scanned');
+  $('idAll').hidden = !(identifyReady && state.model?.ortho && list.length);
   const el = $('existingList');
   if (!list.length) {
     el.innerHTML = `<li class="empty">${state.model?.source === 'manual' ? 'Nothing yet. Load a scan, or add your existing pieces from the furniture list and lock them.' : 'Nothing standing in the yard was found.'}</li>`;
@@ -360,6 +364,24 @@ function renderInspector() {
   $('iFixed').hidden = it.origin !== 'scanned';
   $('iFixed').textContent = it.fixed ? 'Mark movable' : 'Mark fixed';
   $('iDelete').textContent = it.origin === 'scanned' ? 'Not really there' : 'Remove';
+  // identify with Claude, merge
+  const scanned = it.origin === 'scanned' && it.cells?.length;
+  $('idBox').hidden = !(scanned && identifyReady && state.model?.ortho);
+  const gs = it.claudeGuess;
+  $('idResult').hidden = !gs;
+  if (gs) {
+    $('idGuess').textContent = `Claude thinks: ${gs.name || kindName(gs.type) || 'not sure'}`;
+    $('idConf').textContent = `${gs.confidence} confidence`;
+    $('idReason').textContent = gs.reason;
+    $('idUse').hidden = !!gs.applied;
+  }
+  const near = scanned ? nearbyScanned(state.items, it, 2) : [];
+  $('mergeRow').hidden = !near.length;
+  if (near.length) {
+    const prev = $('mergeWith').value;
+    $('mergeWith').innerHTML = near.map((n) => `<option value="${n.item.id}">Merge with ${esc(n.item.name)} (${n.gap < 0.05 ? 'touching' : fmtLen(n.gap, u) + ' away'})</option>`).join('');
+    if (near.some((n) => n.item.id === prev)) $('mergeWith').value = prev;
+  }
   // look
   $('lookBox').hidden = fixedScan;
   const img = $('iPhoto');
@@ -580,10 +602,157 @@ function setTool(t) {
   plan.tool = t;
   $('doorTool').setAttribute('aria-pressed', String(t === 'door'));
   $('measureTool').setAttribute('aria-pressed', String(t === 'measure'));
+  $('markTool').setAttribute('aria-pressed', String(t === 'mark'));
   const hint = $('toolHint');
   hint.hidden = t === 'select';
-  hint.textContent = t === 'door' ? 'Click where the back door opens onto the yard' : 'Drag between two points to measure';
+  hint.textContent = {
+    door: 'Click where the back door opens onto the yard',
+    measure: 'Drag between two points to measure',
+    mark: 'Drag a box around the thing to mark. A box inside a detection splits that part off.',
+  }[t] || '';
   if (t !== 'measure') { plan.measure = null; $('calib').hidden = true; plan.invalidate(); }
+}
+
+// ------------------------------------------------------------------ mark, split, merge
+
+function markBox(b) {
+  setTool('select');
+  if (!state.model || !b) return;
+  const res = markRegion(state.model, state.items, { x0: b.a.x, z0: b.a.z, x1: b.b.x, z1: b.b.z });
+  if (!res) { toast('Drag a bigger box over part of the yard.'); return; }
+  state.items = state.items.filter((it) => !res.removed.includes(it.id));
+  // keep scanned things together, ahead of planned pieces
+  const at = state.items.findIndex((it) => it.origin !== 'scanned');
+  state.items.splice(at < 0 ? state.items.length : at, 0, res.item);
+  dropProposal();
+  select(res.item.id);
+  changed();
+  const it = res.item;
+  if (res.touched.length || res.removed.length) toast(`Split off as its own item (${fmtDims(it.w, it.d, state.units)}). Set its type on the right.`);
+  else if (res.flat) toast('Marked. The scan shows nothing standing there, so its height is set to 1′ 8″. Set its type and height on the right.');
+  else toast(`Marked: ${fmtDims(it.w, it.d, state.units)}, ${fmtLen(it.h, state.units)} tall. Set its type on the right.`);
+}
+
+function mergeSelected() {
+  const a = selectedItem();
+  const b = state.items.find((o) => o.id === $('mergeWith').value);
+  if (!a || !b) return;
+  // keep the one someone named or typed by hand, else the bigger one
+  const handA = a.autoName === false || a.typedByHand, handB = b.autoName === false || b.typedByHand;
+  const keep = handA !== handB ? (handA ? a : b)
+    : !!a.marked !== !!b.marked ? (a.marked ? b : a) // the original detection over a hand-marked piece
+    : a.cells.length >= b.cells.length ? a : b;
+  const gone = keep === a ? b : a;
+  keep.fixed = keep.fixed || gone.fixed;
+  if (keep.fixed) keep.clearance = 0;
+  mergeItems(state.model, keep, gone);
+  state.items = state.items.filter((o) => o !== gone);
+  dropProposal();
+  select(keep.id);
+  changed();
+  toast(`Merged into ${keep.name}: ${fmtDims(keep.w, keep.d, state.units)}.`);
+}
+
+// ------------------------------------------------------------------ identify with Claude
+
+let identifyReady = false; // Claude can look at images on this page
+
+function canopyAround(it) {
+  const m = state.model;
+  const r = Math.round(0.5 / m.cell);
+  const ci = Math.floor((it.home?.x ?? it.x) / m.cell), cj = Math.floor((it.home?.z ?? it.z) / m.cell);
+  const hw = Math.ceil(it.w / 2 / m.cell) + r, hd = Math.ceil(it.d / 2 / m.cell) + r;
+  let n = 0, c = 0;
+  for (let j = Math.max(0, cj - hd); j < Math.min(m.rows, cj + hd); j++)
+    for (let i = Math.max(0, ci - hw); i < Math.min(m.cols, ci + hw); i++) { n++; c += m.canopy[j * m.cols + i]; }
+  return n ? c / n > 0.3 : false;
+}
+
+/** Ask Claude about these scanned items. Resolves Map(id → guess). */
+async function identifyItems(list, onStatus) {
+  const lim = await sampleApi.limits().catch(() => null);
+  const per = Math.max(1, Math.min(8, lim?.images?.maxCount || 1));
+  const out = new Map();
+  for (let i = 0; i < list.length; i += per) {
+    const chunk = list.slice(i, i + per);
+    onStatus(list.length > 1 ? `Claude is looking at ${i + 1}–${i + chunk.length} of ${list.length}…` : 'Claude is looking…');
+    const images = await Promise.all(chunk.map((it) => cropItem(state.model, it)));
+    const entries = chunk.map((it) => ({ w: it.w, d: it.d, h: it.h, shade: canopyAround(it), edge: (it.stats?.edgeFrac || 0) > 0.3, guess: it.name }));
+    const reply = await sampleApi.json(identifyPrompt(entries), { images });
+    const arr = Array.isArray(reply) ? reply : Array.isArray(reply?.items) ? reply.items : [];
+    chunk.forEach((it, n) => {
+      const g = readGuess(arr.find((r) => Number(r?.image) === n + 1) || arr[n]);
+      if (g) out.set(it.id, g);
+    });
+  }
+  return out;
+}
+
+function applyGuess(it, g) {
+  setKind(it, g.type);
+  if (g.name && it.autoName) it.name = g.name;
+  g.applied = true;
+  it.claudeGuess = g;
+}
+
+function identifyError(e, statusId) {
+  const code = e?.code;
+  if (['not_granted', 'sampling_disabled', 'not_declared', 'images_unavailable', 'capability_disabled', 'capability_removed'].includes(code)) {
+    identifyReady = false;
+    renderExisting(); renderInspector();
+    toast('Claude is not available on this page.');
+    return;
+  }
+  const msg = code === 'rate_limited' ? 'Claude is busy right now. Try again in a minute.'
+    : code === 'cancelled' ? '' : 'Claude could not answer that. Try again.';
+  $(statusId).className = 'status err';
+  $(statusId).textContent = msg;
+}
+
+async function identifySelected() {
+  const it = selectedItem();
+  if (!it || busy) return;
+  busy = true;
+  const btn = $('iIdentify');
+  btn.disabled = true;
+  $('idStatus').className = 'status';
+  try {
+    const res = await identifyItems([it], (t) => { $('idStatus').textContent = t; });
+    const g = res.get(it.id);
+    $('idStatus').textContent = g ? '' : 'Claude was not sure. Pick the type yourself.';
+    if (g) { g.applied = false; it.claudeGuess = g; }
+    renderInspector();
+    scheduleSave();
+  } catch (e) { identifyError(e, 'idStatus'); }
+  finally { busy = false; btn.disabled = false; }
+}
+
+async function identifyAll() {
+  if (busy) return;
+  const list = state.items.filter((it) => it.origin === 'scanned' && it.cells?.length)
+    .sort((a, b) => b.w * b.d - a.w * a.d).slice(0, 24);
+  if (!list.length) return;
+  busy = true;
+  const btn = $('idAll');
+  btn.disabled = true;
+  const st = $('idAllStatus');
+  st.className = 'status';
+  try {
+    const res = await identifyItems(list, (t) => { st.textContent = t; });
+    let applied = 0, unsure = 0;
+    for (const it of list) {
+      const g = res.get(it.id);
+      if (!g) continue;
+      // only relabel things nobody has named or typed by hand
+      if (g.confidence !== 'low' && it.autoName !== false && !it.typedByHand) { applyGuess(it, g); applied++; }
+      else { g.applied = false; it.claudeGuess = g; unsure++; }
+    }
+    st.className = 'status ok';
+    st.textContent = `Claude labeled ${applied} item${applied === 1 ? '' : 's'}${unsure ? `; ${unsure} more have a suggestion to review (tap them)` : ''}. Check that fixed and movable are right.`;
+    dropProposal();
+    changed();
+  } catch (e) { identifyError(e, 'idAllStatus'); }
+  finally { busy = false; btn.disabled = false; }
 }
 
 function showCalib(m) {
@@ -716,6 +885,17 @@ function bind() {
   $('houseSide').onchange = (e) => { state.model.houseSide = e.target.value; state.door = null; dropProposal(); changed(); };
   $('doorTool').onclick = () => setTool(plan.tool === 'door' ? 'select' : 'door');
   $('measureTool').onclick = () => setTool(plan.tool === 'measure' ? 'select' : 'measure');
+  $('markTool').onclick = () => setTool(plan.tool === 'mark' ? 'select' : 'mark');
+  $('mergeBtn').onclick = mergeSelected;
+  $('iIdentify').onclick = identifySelected;
+  $('idAll').onclick = identifyAll;
+  $('idUse').onclick = () => {
+    const it = selectedItem();
+    if (!it?.claudeGuess) return;
+    applyGuess(it, it.claudeGuess);
+    dropProposal();
+    changed();
+  };
   $('calibBtn').onclick = () => {
     const real = fromInput($('calibLen').value, state.units);
     if (!(real > 0) || !state.measured) return;
@@ -794,6 +974,7 @@ function bind() {
     const it = selectedItem();
     if (!it) return;
     setKind(it, e.target.value);
+    it.typedByHand = true;
     dropProposal();
     changed();
   });
@@ -905,16 +1086,20 @@ function bind() {
     if (!f) return;
     try { applyProject(deserialize(await f.text())); toast('Project opened.'); } catch (err) { toast(err.message); }
   });
-  if (embedded) {
-    // inside Claude: saving goes through Claude's save dialog, and Claude can read sizes
-    document.querySelectorAll('.dl').forEach((el) => { if (el.id !== 'openProject') el.hidden = true; });
-    document.querySelector('label[for="openProject"]').hidden = false;
-    const use = window.claude?.use;
-    if (use) {
-      use('downloads').then((d) => { if (d) { downloadsApi = d; document.querySelectorAll('.dl').forEach((el) => { el.hidden = el.id === 'openProject'; }); } }).catch(() => {});
-      use('sample').then((f) => { if (f) { sampleApi = f; $('impAsk').hidden = false; } }).catch(() => {});
-    }
+  // inside Claude: saving goes through Claude's save dialog, and Claude can read sizes and photos
+  if (embedded) document.querySelectorAll('.dl').forEach((el) => { el.hidden = el.tagName !== 'LABEL'; });
+  const use = (name) => window.claude.use(name);
+  if (typeof window.claude?.use === 'function') {
+    use('downloads').then((d) => { if (d) { downloadsApi = d; document.querySelectorAll('.dl').forEach((el) => { el.hidden = false; }); } }).catch(() => {});
+    use('sample').then(async (f) => {
+      if (!f) return;
+      sampleApi = f;
+      $('impAsk').hidden = false;
+      const lim = await f.limits().catch(() => null);
+      if (lim?.images) { identifyReady = true; renderExisting(); renderInspector(); }
+    }).catch(() => {});
   }
+
 
   document.addEventListener('keydown', (e) => {
     if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) return;

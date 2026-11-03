@@ -86,3 +86,37 @@ test('importer reads common size formats', async () => {
   assert.equal(r6.kind, 'dining6');
   assert.match(r6.name, /Acme 6 Person Teak Dining Set/);
 });
+
+test('mark, split and merge scanned items', async () => {
+  const { markRegion, mergeItems, nearbyScanned } = await import('../js/analyze.js');
+  const { model, items } = sampleYard();
+  const shed = items.find((i) => i.name === 'Shed');
+  const cellsBefore = shed.cells.length;
+  // a box on open lawn: nothing stands there, so the box itself becomes the item
+  const lawn = markRegion(model, items, { x0: 8, z0: 9, x1: 9.5, z1: 9.6 });
+  assert.ok(lawn.flat && Math.abs(lawn.item.w - 1.5) < 0.06 && Math.abs(lawn.item.d - 0.6) < 0.06);
+  assert.equal(lawn.item.h, 0.5);
+  // a box over the left half of the shed splits it
+  const half = markRegion(model, items, { x0: 0, z0: 9, x1: 1.6, z1: 12 });
+  assert.deepEqual(half.touched, [shed.id]);
+  assert.ok(half.item.fixed, 'a piece split from a fixed shed stays fixed');
+  assert.ok(Math.abs(half.item.h - 2.3) < 0.01);
+  assert.equal(shed.cells.length + half.item.cells.length, cellsBefore);
+  assert.ok(Math.abs(shed.w - 1.2) < 0.06);
+  // and merging puts it back
+  items.push(half.item);
+  assert.equal(nearbyScanned(items, shed)[0].item, half.item);
+  mergeItems(model, shed, half.item);
+  assert.equal(shed.cells.length, cellsBefore);
+  assert.ok(Math.abs(shed.w - 2.4) < 0.06 && Math.abs(shed.x - 1.6) < 0.06);
+});
+
+test('identify prompt and reply parsing', async () => {
+  const { identifyPrompt, readGuess } = await import('../js/identify.js');
+  const p = identifyPrompt([{ w: 1.4, d: 0.6, h: 1.1, shade: false, edge: false, guess: 'Grill?' }]);
+  assert.match(p, /Image 1: footprint 1\.40 m × 0\.60 m, top 1\.10 m/);
+  assert.match(p, /grill \(Grill\)/);
+  assert.deepEqual(readGuess({ type: 'grill', name: 'Gas grill', confidence: 'high', reason: 'x' }), { type: 'grill', name: 'Gas grill', confidence: 'high', reason: 'x' });
+  assert.equal(readGuess({ type: 'spaceship', confidence: 'sure' }).type, 'scanned');
+  assert.equal(readGuess({ type: 'tree', confidence: 'sure' }).confidence, 'low');
+});

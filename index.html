@@ -90,6 +90,7 @@
       <div class="row">
         <button type="button" class="btn small tool" id="doorTool" aria-pressed="false">Set door</button>
         <button type="button" class="btn small tool" id="measureTool" aria-pressed="false">Measure</button>
+        <button type="button" class="btn small tool" id="markTool" aria-pressed="false" title="Drag a box around something the scan missed, or around part of a detection to split it off">Mark an item</button>
       </div>
       <div class="row">
         <label class="btn small ghost" for="bgFile" title="An aerial or satellite screenshot of the yard, stretched to the yard's outline">Background photo</label>
@@ -107,7 +108,9 @@
 
     <section class="card">
       <h2><span class="step">3</span>Already in the yard</h2>
-      <p class="hint">Found in the scan. Tap one to say what it is (tree, shrub, table…). Only things marked <em>Movable</em> get new spots.</p>
+      <p class="hint">Found in the scan. Tap one to say what it is (tree, shrub, table…). Only things marked <em>Movable</em> get new spots. Missed something? Use <em>Mark an item</em> above.</p>
+      <button type="button" id="idAll" class="btn small" hidden>Identify all with Claude</button>
+      <div id="idAllStatus" class="status" role="status" aria-live="polite"></div>
       <ul id="existingList" class="list"></ul>
     </section>
 
@@ -193,6 +196,20 @@
         <label for="iC">Clearance</label><span class="unit-input"><input id="iC" type="number" step="0.5" min="0"><span class="u">ft</span></span>
       </div>
       <p class="hint" id="iInfo"></p>
+      <div class="identify" id="idBox" hidden>
+        <button type="button" class="btn small" id="iIdentify">Identify with Claude</button>
+        <div class="id-result" id="idResult" hidden>
+          <p><strong id="idGuess"></strong> <span class="conf" id="idConf"></span></p>
+          <p class="hint" id="idReason"></p>
+          <button type="button" class="btn small primary" id="idUse">Use this</button>
+        </div>
+        <div class="status" id="idStatus" role="status" aria-live="polite"></div>
+      </div>
+      <div class="row" id="mergeRow" hidden>
+        <label for="mergeWith" class="sr">Merge with</label>
+        <select id="mergeWith"></select>
+        <button type="button" class="btn small" id="mergeBtn">Merge</button>
+      </div>
       <div class="look" id="lookBox">
         <h3>Look</h3>
         <div class="look-grid">

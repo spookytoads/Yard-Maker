@@ -171,6 +171,12 @@ textarea { width: 100%; min-width: 0; resize: vertical; padding: 7px 9px; border
 .cat-head { grid-column: 1 / -1; margin: 4px 0 0; font: 700 11px var(--font-ui); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
 .status.ok { color: var(--open); }
 
+.identify { display: flex; flex-direction: column; gap: 6px; }
+.id-result { border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.id-result p { margin: 0; }
+.conf { font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); }
+#mergeRow select { flex: 1; min-width: 0; }
+
 /* stage */
 .stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .stage-bar { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--line); }
