@@ -23,6 +23,17 @@ It runs entirely in the browser. Your scan never leaves your device.
 
   Every suggestion is explained ("13′ from the house, outside the 10 ft safety distance;
   open sky above"). You can apply one move at a time, apply them all, or ask for another option.
+- **Imports furniture sizes.** Paste a size (`72" x 40" x 30"`, `183 x 102 x 76 cm`,
+  `6' x 3'4"`, `32 in. diameter`), the specs section copied from a product page, or a link.
+  It picks the overall size and ignores package, seat and arm sizes. Stores don't let other
+  websites read their pages, so for links use the **Grab furniture size** bookmark: drag it to
+  your bookmarks bar, click it on any product page, and paste what it copies. Inside Claude,
+  **Ask Claude** can also read messy specs or estimate a size from a link or product name
+  (marked as an estimate).
+- **Lets you say what everything is.** Every piece, scanned or planned, has a *Type*: furniture,
+  plants (tree, shrub, hedge, flower bed, boulder) or features (house, fence, wall, shed,
+  deck, pool, AC unit). The type sets the label, the 3D model, whether it starts Fixed, and
+  the placement rules (new trees at least 15 ft from the house, shrubs and hedges along the edges).
 - **Shows what it will look like.** The 3D tab shows the scan with simple models of each piece.
   Give any piece a **product photo** (it stands in the yard as a cutout) or a **texture photo**
   (wood, stone, fabric), or pick a built-in finish. For yards without a scan, you can add a
@@ -67,7 +78,8 @@ self-contained page used to publish the app as a Claude artifact.
 | `js/scan.js` | Loads the export and renders it with orthographic cameras straight down and straight up into small offscreen targets. These passes give the top surface, the ground, and the lowest thing standing above the ground in each cell (to tell walk-under canopy from obstacles). Steep triangles such as walls and trunks are also walked on the CPU, because a top-down render sees them edge-on. |
 | `js/analyze.js` | Cleans the ground surface, finds obstacles and canopy, groups obstacles into features and labels them. |
 | `js/optimizer.js` | Scores a layout (hard limits, clearances, placement rules, walkway reachability, open lawn size) and searches with a greedy seed followed by simulated annealing. |
-| `js/catalog.js` | Furniture sizes, clearances and placement rules. |
+| `js/catalog.js` | Furniture and plant sizes, clearances, placement rules, and feature types. |
+| `js/importer.js` | Reads pasted sizes, product specs and bookmark output; the bookmark itself. |
 | `js/notes.js` | Writes the plain-language suggestions and the summary for Claude. |
 | `js/plan.js`, `js/view3d.js`, `js/looks.js` | 2D plan, 3D preview, finishes and models. |
 

@@ -119,30 +119,8 @@ export class View3D {
     const m = this.model;
     const g = new THREE.Group();
     g.position.set(m.origin.x + it.x, groundAt(m, it.x, it.z), m.origin.z + it.z);
-    const bark = new THREE.MeshStandardMaterial({ color: 0x5b4330, roughness: 1 });
-    if (it.scanType === 'tree') {
-      const r = Math.max(0.12, Math.min(it.w, it.d) / 2);
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.8, r, it.h * 0.55, 12), bark);
-      trunk.position.y = it.h * 0.275;
-      g.add(trunk);
-      const leaf = new THREE.MeshStandardMaterial({ color: 0x3f6b2e, roughness: 0.9 });
-      const R = Math.max(1.4, Math.min(3.5, it.h * 0.36));
-      for (const [dx, dy, dz, s] of [[0, 0, 0, 1], [R * 0.4, -R * 0.2, R * 0.2, 0.7], [-R * 0.35, -R * 0.15, -R * 0.3, 0.75]]) {
-        const c = new THREE.Mesh(new THREE.IcosahedronGeometry(R * s, 1), leaf);
-        c.position.set(dx, it.h - R * 0.9 + dy, dz);
-        g.add(c);
-      }
-    } else {
-      const mat = new THREE.MeshStandardMaterial({ color: it.isHouse ? 0xd9d4ca : 0x8a8177, roughness: 0.9 });
-      const b = new THREE.Mesh(new THREE.BoxGeometry(it.w, it.h, it.d), mat);
-      b.position.y = it.h / 2;
-      g.add(b);
-      if (it.scanType === 'shed' || it.scanType === 'structure') {
-        const roof = new THREE.Mesh(new THREE.BoxGeometry(it.w + 0.2, 0.08, it.d + 0.2), new THREE.MeshStandardMaterial({ color: 0x4a4c50 }));
-        roof.position.y = it.h;
-        g.add(roof);
-      }
-    }
+    const kind = it.kind !== 'scanned' ? it.kind : it.scanType === 'shed' ? 'structure' : it.scanType;
+    g.add(buildModel(THREE, { ...it, kind }, this.materialsFor({ ...it, kind })));
     return g;
   }
 
@@ -154,9 +132,11 @@ export class View3D {
       water: new THREE.MeshStandardMaterial({ color: 0x3aa7c9, roughness: 0.15, metalness: 0.1 }),
       sand: new THREE.MeshStandardMaterial({ color: 0xe2cf9c, roughness: 1 }),
       soil: new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 1 }),
-      leaf: new THREE.MeshStandardMaterial({ color: 0x4f8a3a, roughness: 0.9 }),
+      leaf: new THREE.MeshStandardMaterial({ color: 0x3f6b2e, roughness: 0.9 }),
       flame: new THREE.MeshStandardMaterial({ color: 0xff7a1a, emissive: 0xff5a00, emissiveIntensity: 1.2 }),
       stone: this.texMat(finishCanvas('stone'), 0.6),
+      bark: new THREE.MeshStandardMaterial({ color: 0x5b4330, roughness: 1 }),
+      wall: new THREE.MeshStandardMaterial({ color: 0xd9d4ca, roughness: 0.9 }),
       fabric: this.texMat(finishCanvas('fabric'), 0.8),
     });
     const src = textureFor(it, () => this.setItems(this.lastItems));

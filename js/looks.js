@@ -11,6 +11,7 @@ export const FINISHES = {
 };
 
 const AUTO = {
+  fence: 'wood', deck: 'wood', wall: 'stone', boulder: 'stone',
   dining6: 'teak', bistro: 'metal', sofa: 'wicker', chaise: 'wicker', adirondack: 'wood', hammock: 'fabric',
   bench: 'teak', firepit: 'stone', grill: 'metal', hottub: 'wood', playset: 'wood', trampoline: 'metal',
   sandbox: 'wood', cornhole: 'wood', gardenbed: 'wood', planter: 'stone', shed: 'wood',
@@ -341,6 +342,69 @@ export function buildModel(THREE, it, mats, accent) {
       box(0.9, 1.8, 0.03, 0, 0.9, d / 2 + 0.01, mats.dark);
       break;
     }
+    case 'tree': {
+      // a scanned tree is measured at the trunk; a planned one by its canopy
+      const scanned = it.origin === 'scanned';
+      const R = scanned ? Math.max(1.4, Math.min(3.5, h * 0.36)) : Math.max(0.6, Math.min(w, d) / 2);
+      const r = scanned ? Math.max(0.1, Math.min(w, d) / 2) : Math.max(0.08, R * 0.08);
+      cyl(r * 0.8, r, h * 0.6, 0, h * 0.3, 0, mats.bark, 10);
+      for (const [dx, dy, dz, k] of [[0, 0, 0, 1], [R * 0.4, -R * 0.25, R * 0.2, 0.7], [-R * 0.35, -R * 0.2, -R * 0.3, 0.72]]) {
+        const c = new THREE.Mesh(new THREE.IcosahedronGeometry(R * k, 1), mats.leaf);
+        c.position.set(dx, Math.max(R, h - R * 0.9) + dy, dz);
+        g.add(c);
+      }
+      break;
+    }
+    case 'shrub': {
+      for (const [dx, dz, k] of [[0, 0, 1], [w * 0.22, d * 0.15, 0.7], [-w * 0.2, -d * 0.18, 0.75]]) {
+        const b = new THREE.Mesh(new THREE.IcosahedronGeometry(Math.min(w, d) / 2 * k, 1), mats.leaf);
+        b.scale.y = (h / Math.min(w, d)) * 1.1;
+        b.position.set(dx, h * 0.45 * k, dz);
+        g.add(b);
+      }
+      break;
+    }
+    case 'hedge': {
+      const hb = box(w, h, d, 0, h / 2, 0, mats.leaf);
+      hb.geometry = new THREE.BoxGeometry(w, h, d, 6, 3, 2);
+      break;
+    }
+    case 'flowerbed': {
+      box(w, 0.12, d, 0, 0.06, 0, mats.soil);
+      const colors = [0xe0507a, 0xf2c14e, 0xffffff, 0x9b6ad6];
+      for (let i = 0; i < Math.round(w * d * 6); i++) {
+        const m = new THREE.MeshStandardMaterial({ color: colors[i % colors.length], roughness: 0.8 });
+        const f = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 5), m);
+        f.position.set((((i * 0.618) % 1) - 0.5) * (w - 0.2), 0.2 + (i % 3) * 0.04, ((((i * 0.371) % 1)) - 0.5) * (d - 0.2));
+        g.add(f);
+        const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.11, 6, 5), mats.leaf);
+        leaf.position.set(f.position.x, 0.12, f.position.z);
+        g.add(leaf);
+      }
+      break;
+    }
+    case 'boulder': {
+      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5, 0), mats.stone);
+      rock.scale.set(w, h * 1.6, d);
+      rock.position.y = h * 0.35;
+      g.add(rock);
+      break;
+    }
+    case 'deck': box(w, Math.max(0.05, Math.min(h, 0.6)), d, 0, Math.max(0.05, Math.min(h, 0.6)) / 2, 0, mats.main); break;
+    case 'pool': {
+      box(w, 0.15, d, 0, 0.075, 0, mats.stone);
+      box(w - 0.4, 0.02, d - 0.4, 0, 0.16, 0, mats.water);
+      break;
+    }
+    case 'fence':
+    case 'wall': box(w, h, d, 0, h / 2, 0, it.kind === 'fence' ? mats.main : mats.stone); break;
+    case 'house':
+    case 'structure': {
+      box(w, h, d, 0, h / 2, 0, mats.wall);
+      box(w + 0.2, 0.1, d + 0.2, 0, h, 0, mats.dark);
+      break;
+    }
+    case 'utility': box(w, h, d, 0, h / 2, 0, mats.metal); break;
     default: {
       box(w, h, d, 0, h / 2, 0);
     }

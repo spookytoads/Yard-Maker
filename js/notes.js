@@ -1,9 +1,10 @@
 // Plain-language explanations of a suggested layout, and a text summary to paste into Claude.
 import { measure, footprint, isMovable, houseGap } from './optimizer.js';
-import { CATALOG_BY_KIND, rulesOf } from './catalog.js';
+import { CATALOG_BY_KIND, rulesOf, kindName } from './catalog.js';
 import { fmtLen, fmtDims, fmtArea } from './units.js';
 
 const pct = (f) => `${Math.round(f * 100)}%`;
+const typeOf = (it) => { const k = kindName(it.kind); return k && k !== it.name && it.kind !== 'scanned' ? ` [${k}]` : ''; };
 
 export function whereText(site, fp, units) {
   const h = site.house;
@@ -93,7 +94,7 @@ export function claudeSummary(state) {
   if (fixed.length) {
     lines.push('## Fixed features');
     for (const it of fixed)
-      lines.push(`- ${it.name}: ${fmtDims(it.w, it.d, units)} footprint, ${fmtLen(it.h, units)} tall, at (${fmtLen(it.x, units)}, ${fmtLen(it.z, units)})`);
+      lines.push(`- ${it.name}${typeOf(it)}: ${fmtDims(it.w, it.d, units)} footprint, ${fmtLen(it.h, units)} tall, at (${fmtLen(it.x, units)}, ${fmtLen(it.z, units)})`);
     lines.push('');
   }
   const rest = items.filter((it) => !it.fixed);
@@ -101,7 +102,7 @@ export function claudeSummary(state) {
     lines.push('## Furniture and movable items');
     for (const it of rest) {
       const fp = footprint(it);
-      lines.push(`- ${it.name}${it.origin === 'scanned' ? ' (already in the yard)' : ' (planned)'}${it.locked ? ' [locked in place]' : ''}: ${fmtDims(fp.w, fp.d, units)}, needs ${fmtLen(it.clearance || 0, units)} clearance, at (${fmtLen(it.x, units)}, ${fmtLen(it.z, units)})`);
+      lines.push(`- ${it.name}${typeOf(it)}${it.origin === 'scanned' ? ' (already in the yard)' : ' (planned)'}${it.locked ? ' [locked in place]' : ''}: ${fmtDims(fp.w, fp.d, units)}, needs ${fmtLen(it.clearance || 0, units)} clearance, at (${fmtLen(it.x, units)}, ${fmtLen(it.z, units)})`);
     }
     lines.push('');
   }

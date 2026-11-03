@@ -67,3 +67,22 @@ function overlapArea(a, b) {
   const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0), d = Math.min(a.z1, b.z1) - Math.max(a.z0, b.z0);
   return w > 0 && d > 0 ? w * d : 0;
 }
+
+test('importer reads common size formats', async () => {
+  const { parseProduct } = await import('../js/importer.js');
+  const inch = (m) => Math.round(m / 0.0254 * 10) / 10;
+  const r1 = parseProduct('72"W x 40"D x 30"H');
+  assert.deepEqual([inch(r1.w), inch(r1.d), inch(r1.h)], [72, 40, 30]);
+  const r2 = parseProduct('Overall: 84.25" L x 40" W x 29.5" H\nPackage dimensions: 50 x 30 x 12 in');
+  assert.deepEqual([inch(r2.w), inch(r2.d), inch(r2.h)], [84.3, 40, 29.5]);
+  const r3 = parseProduct('Fire pit, 32 in. diameter x 24 in. H');
+  assert.ok(r3.round && inch(r3.w) === 32 && r3.kind === 'firepit');
+  const r4 = parseProduct('Patio Set\nProduct Width (in.) 84 in\nProduct Depth (in.)\n42 in\nAssembled Height (in.): 30 in');
+  assert.deepEqual([inch(r4.w), inch(r4.d), inch(r4.h)], [84, 42, 30]);
+  const r5 = parseProduct('183 x 102 x 76 cm');
+  assert.ok(Math.abs(r5.w - 1.83) < 1e-6 && Math.abs(r5.d - 1.02) < 1e-6);
+  const r6 = parseProduct('https://example.com/p/acme-6-person-teak-dining-set-w123456789.html');
+  assert.equal(r6.ok, false);
+  assert.equal(r6.kind, 'dining6');
+  assert.match(r6.name, /Acme 6 Person Teak Dining Set/);
+});

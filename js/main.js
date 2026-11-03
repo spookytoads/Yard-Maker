@@ -1,5 +1,6 @@
 // Yard Maker: app state and UI wiring.
-import { CATALOG, CATALOG_BY_KIND, CATEGORIES, categoryOf } from './catalog.js';
+import { CATALOG, CATALOG_BY_KIND, CATEGORIES, FEATURE_BY_KIND, FIXED_KINDS, categoryOf, typeGroups, kindName } from './catalog.js';
+import { parseProduct, claudePrompt, fromClaude, BOOKMARKLET } from './importer.js';
 import { manualYard, yardStats, newId } from './analyze.js';
 import { sampleYard, drawSampleOrtho } from './sample.js';
 import { optimize, buildSite, evaluate, footprint } from './optimizer.js';
@@ -105,6 +106,30 @@ function newItem(kind, x, z, rot = 0) {
   };
 }
 
+/** Say what a piece is. Scanned things keep their measured size; catalog pieces adopt theirs. */
+function setKind(it, kind) {
+  const c = CATALOG_BY_KIND[kind], f = FEATURE_BY_KIND[kind];
+  const was = it.kind;
+  it.kind = kind;
+  delete it.cat;
+  if (kind === 'scanned' && it.origin !== 'scanned') { it.kind = 'custom'; it.cat = 'other'; }
+  if (it.origin === 'scanned') {
+    it.scanType = kind;
+    if (was !== kind) it.fixed = FIXED_KINDS.has(kind) || (!c && !!f?.fixed);
+    if (it.autoName || !it.name) it.name = kind === 'scanned' ? 'Object' : kindName(kind);
+    it.clearance = it.fixed ? 0 : c ? c.clearance : 0.5;
+  } else if (c) {
+    if (!it.imported) { it.w = c.w; it.d = c.d; it.h = c.h; it.shape = c.shape || 'rect'; }
+    if (!it.imported || it.autoName) it.name = c.name;
+    it.clearance = c.clearance;
+  } else if (f) {
+    if (it.autoName) it.name = f.name;
+    it.clearance = 0;
+  }
+}
+
+const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return 'a link'; } };
+
 function freeSpotFor(it) {
   const o = state.openNow;
   const m = state.model;
@@ -209,13 +234,33 @@ function applyProject(d) {
   setUnits(state.units);
 }
 
-function download(name, href) {
+let downloadsApi = null; // the Claude page's save dialog, when available
+
+/** Save a file: through Claude's save dialog inside Claude, else a normal download. */
+async function saveFile(name, data) {
+  const blob = typeof data === 'string' && data.startsWith('data:') ? dataUrlBlob(data) : new Blob([data]);
+  if (embedded) {
+    if (!downloadsApi) { toast('Saving files is not available here.'); return; }
+    try { await downloadsApi.save({ filename: name, data: blob }); toast('Saved.'); }
+    catch (e) { if (e?.code !== 'declined') toast('That file could not be saved here.'); }
+    return;
+  }
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = href;
+  a.href = url;
   a.download = name;
   document.body.appendChild(a);
   a.click();
   a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function dataUrlBlob(url) {
+  const [head, body] = url.split(',');
+  const bin = atob(body);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return new Blob([u8], { type: head.slice(5).split(';')[0] });
 }
 
 // ------------------------------------------------------------------ rendering
@@ -276,13 +321,15 @@ function renderNew() {
 }
 
 function renderCatalog() {
-  $('catalog').innerHTML = CATALOG.map((c) => `
+  const btn = (c) => `
     <button type="button" data-kind="${c.kind}" style="--c:${CATEGORIES[c.cat].color}" title="${esc(c.why)}">
       <b>${esc(c.name)}</b><small>${fmtDims(c.w, c.d, state.units)}</small>
-    </button>`).join('');
-  const sel = $('iKind');
-  sel.innerHTML = '<option value="scanned">No type (no placement rules)</option>' +
-    CATALOG.map((c) => `<option value="${c.kind}">${esc(c.name)}</option>`).join('');
+    </button>`;
+  const [furn, garden] = typeGroups();
+  $('catalog').innerHTML = `<p class="cat-head">Furniture</p>${furn.items.map(btn).join('')}<p class="cat-head">Garden and plants</p>${garden.items.map(btn).join('')}`;
+  const menu = typeGroups().map((g) => `<optgroup label="${g.label}">${g.items.map((c) => `<option value="${c.kind}">${esc(c.name)}</option>`).join('')}</optgroup>`).join('');
+  $('iKind').innerHTML = menu;
+  $('impKind').innerHTML = menu;
 }
 
 function selectedItem() { return state.items.find((it) => it.id === state.selected) || null; }
@@ -295,13 +342,13 @@ function renderInspector() {
   const fixedScan = it.origin === 'scanned' && it.fixed;
   $('inspTitle').textContent = it.origin === 'scanned' ? 'In your yard' : 'Planned piece';
   setVal('iName', it.name);
-  $('iKind').value = CATALOG_BY_KIND[it.kind] ? it.kind : 'scanned';
-  $('iKind').disabled = fixedScan;
+  $('iKind').value = CATALOG_BY_KIND[it.kind] || FEATURE_BY_KIND[it.kind] ? it.kind : 'scanned';
   const fp = footprint(it);
   setVal('iW', toInput(it.w, u)); setVal('iD', toInput(it.d, u)); setVal('iC', toInput(it.clearance || 0, u));
   for (const id of ['iW', 'iD', 'iC']) $(id).disabled = fixedScan;
   const info = [];
   if (it.origin === 'scanned') info.push(`Measured from the scan: ${fmtDims(it.w, it.d, u)}, ${fmtLen(it.h, u)} tall.`);
+  if (it.sourceUrl) info.push(`Imported from ${hostOf(it.sourceUrl)}.`);
   info.push(`Center: ${fmtLen(it.x, u)} from the left, ${fmtLen(it.z, u)} from the top. Footprint ${fmtDims(fp.w, fp.d, u)}.`);
   const c = CATALOG_BY_KIND[it.kind];
   if (c && !fixedScan) info.push(`Planner puts it ${c.why}.`);
@@ -369,6 +416,96 @@ function select(id) {
   renderNew();
   renderInspector();
   plan.invalidate();
+}
+
+// ------------------------------------------------------------------ import
+
+let imp = null;      // the size being reviewed before it is added
+let sampleApi = null; // Claude, when this page runs inside Claude
+
+function impStatus(msg, cls = '') {
+  const el = $('impStatus');
+  el.className = `status ${cls}`;
+  el.textContent = msg;
+}
+
+function showImport(r) {
+  imp = { ...r, autoName: !r.name };
+  const u = state.units;
+  const kind = r.kind || 'scanned';
+  const c = CATALOG_BY_KIND[kind];
+  $('impResult').hidden = false;
+  $('impName').value = r.name || (c ? c.name : 'New piece');
+  $('impKind').value = kind;
+  $('impW').value = r.w ? toInput(r.w, u) : '';
+  $('impD').value = r.d ? toInput(r.d, u) : '';
+  $('impH').value = r.h ? toInput(r.h, u) : '';
+  $('impC').value = toInput(c ? c.clearance : 0.5, u);
+  $('impRound').checked = r.round || c?.shape === 'circle';
+}
+
+function readImport() {
+  const text = $('impText').value.trim();
+  if (!text) { impStatus('Paste a size, the specs from a product page, or a link first.'); return; }
+  const r = parseProduct(text, { units: state.units });
+  const u = state.units;
+  if (r.ok) {
+    showImport(r);
+    const where = { size: 'Read from the size you entered', specs: 'Read from the pasted specs', bookmark: `Read from ${hostOf(r.url)}` }[r.from] || 'Read';
+    impStatus(`${where}: ${fmtDims(r.w, r.d, u)}${r.h ? `, ${fmtLen(r.h, u)} tall` : ''}. Check the type, then add it.${r.notes.length ? ' ' + r.notes.join(' ') : ''}`, 'ok');
+    return;
+  }
+  if (r.url) {
+    showImport(r);
+    impStatus(`Stores don't let other websites read their pages, so the link alone has no size. On the product page, click the Grab furniture size bookmark or copy the Dimensions section and paste it here${sampleApi ? ', or press Ask Claude to look it up' : ''}. You can also type the size below.`);
+    return;
+  }
+  impStatus(`No size found. Try something like 72 x 40 x 30 in${sampleApi ? ', or press Ask Claude' : ''}.`, 'err');
+}
+
+async function askClaude() {
+  const text = $('impText').value.trim();
+  if (!sampleApi || !text) { if (!text) impStatus('Paste a link, product name or specs first.'); return; }
+  const btn = $('impAsk');
+  btn.disabled = true;
+  impStatus('Asking Claude…');
+  try {
+    const j = await sampleApi.json(claudePrompt(text));
+    const r = fromClaude(j);
+    if (!r.ok) { impStatus('Claude could not find a size for that. Try pasting the Dimensions section from the product page.', 'err'); return; }
+    if (!r.url) r.url = (text.match(/https?:\/\/\S+/) || [''])[0];
+    showImport(r);
+    impStatus(`Claude says ${fmtDims(r.w, r.d, state.units)}${r.h ? `, ${fmtLen(r.h, state.units)} tall` : ''}. ${r.notes.join(' ')}`, r.estimated ? '' : 'ok');
+  } catch (e) {
+    if (e?.code === 'not_granted' || e?.code === 'sampling_disabled' || e?.code === 'not_declared') { btn.hidden = true; impStatus('Claude is not available on this page.'); }
+    else if (e?.code === 'rate_limited') impStatus('Claude is busy right now. Try again in a minute.', 'err');
+    else if (e?.code !== 'cancelled') impStatus('Claude could not answer that. Try again, or paste the Dimensions section instead.', 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function addImported() {
+  if (!state.model) return;
+  const u = state.units;
+  const w = fromInput($('impW').value, u), d = fromInput($('impD').value, u);
+  if (!(w > 0.05 && d > 0.05)) { impStatus('Enter a width and depth before adding it.', 'err'); return; }
+  const h = fromInput($('impH').value, u), c = fromInput($('impC').value, u);
+  const kind = $('impKind').value;
+  const cat = CATALOG_BY_KIND[kind];
+  const it = {
+    id: newId('n'), name: $('impName').value.trim() || kindName(kind) || 'New piece',
+    kind: cat || FEATURE_BY_KIND[kind] && kind !== 'scanned' ? kind : 'custom',
+    origin: 'new', imported: true, sourceUrl: imp?.url || undefined,
+    w, d, h: h > 0 ? h : cat?.h || 0.8, clearance: c >= 0 ? c : 0.5,
+    shape: $('impRound').checked ? 'circle' : 'rect', x: 0, z: 0, rot: 0, fixed: false, locked: false, finish: 'auto',
+  };
+  if (it.kind === 'custom') it.cat = 'other';
+  addItem(it);
+  $('impResult').hidden = true;
+  $('impText').value = '';
+  impStatus('');
+  imp = null;
 }
 
 async function suggest(seed) {
@@ -485,7 +622,7 @@ function setUnits(u) {
   $('uM').setAttribute('aria-pressed', String(u === 'metric'));
   document.querySelectorAll('.u').forEach((el) => { el.textContent = unitLabel(u); });
   if (old !== u) {
-    for (const id of ['manW', 'manD', 'cW', 'cD', 'cC', 'calibLen']) {
+    for (const id of ['manW', 'manD', 'impW', 'impD', 'impH', 'impC', 'calibLen']) {
       const v = fromInput($(id).value, old);
       if (Number.isFinite(v)) $(id).value = toInput(v, u);
     }
@@ -631,24 +768,32 @@ function bind() {
     const b = e.target.closest('[data-kind]');
     if (b && state.model) addItem(newItem(b.dataset.kind, 0, 0));
   });
-  $('customBtn').onclick = () => {
-    const u = state.units;
-    const w = fromInput($('cW').value, u), d = fromInput($('cD').value, u), c = fromInput($('cC').value, u);
-    if (!(w > 0 && d > 0)) { toast('Enter a width and depth.'); return; }
-    addItem({
-      id: newId('n'), name: $('cName').value.trim() || 'Custom piece', kind: 'custom', cat: 'other', origin: 'new',
-      w, d, h: 0.8, clearance: Math.max(0, c || 0), shape: 'rect', x: 0, z: 0, rot: 0, fixed: false, locked: false, finish: 'auto',
-    });
+  // import a size or product
+  $('impRead').onclick = () => readImport();
+  $('impText').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) readImport(); });
+  $('impText').addEventListener('paste', () => setTimeout(() => { if (/YARDMAKER|\d/.test($('impText').value)) readImport(); }, 0));
+  $('impAsk').onclick = () => askClaude();
+  $('impKind').addEventListener('change', (e) => {
+    const c = CATALOG_BY_KIND[e.target.value];
+    if (c) { $('impC').value = toInput(c.clearance, state.units); $('impRound').checked = c.shape === 'circle'; }
+    if (imp && imp.autoName) $('impName').value = kindName(e.target.value) || $('impName').value;
+  });
+  $('impName').addEventListener('input', () => { if (imp) imp.autoName = false; });
+  $('impAdd').onclick = () => addImported();
+  const bm = $('bmLink');
+  bm.href = 'javascript:' + encodeURIComponent(BOOKMARKLET);
+  bm.addEventListener('click', (e) => { e.preventDefault(); toast('Drag this button to your bookmarks bar, then click it on a product page.'); });
+  $('bmCopy').onclick = async () => {
+    try { await navigator.clipboard.writeText('javascript:' + BOOKMARKLET); toast('Code copied. Make a new bookmark and paste it as the address.'); }
+    catch { toast('Copy was blocked. Drag the button to your bookmarks bar instead.'); }
   };
 
   // inspector
-  $('iName').addEventListener('input', (e) => { const it = selectedItem(); if (it) { it.name = e.target.value; renderExisting(); renderNew(); plan.invalidate(); scheduleSave(); } });
+  $('iName').addEventListener('input', (e) => { const it = selectedItem(); if (it) { it.name = e.target.value; it.autoName = false; renderExisting(); renderNew(); plan.invalidate(); scheduleSave(); } });
   $('iKind').addEventListener('change', (e) => {
     const it = selectedItem();
     if (!it) return;
-    it.kind = e.target.value;
-    const c = CATALOG_BY_KIND[it.kind];
-    if (c) { it.clearance = c.clearance; if (it.origin !== 'scanned') { it.w = c.w; it.d = c.d; it.h = c.h; it.shape = c.shape || 'rect'; it.name = c.name; } }
+    setKind(it, e.target.value);
     dropProposal();
     changed();
   });
@@ -752,19 +897,24 @@ function bind() {
       toast(ok ? 'Copied. Paste it into a Claude chat.' : 'Copy was blocked by the browser.');
     }
   };
-  $('saveBtn').onclick = () => {
-    const url = URL.createObjectURL(new Blob([serialize(true)], { type: 'application/json' }));
-    download('yard-plan.json', url);
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-  };
-  $('savePng').onclick = () => download('yard-plan.png', $('view3d').hidden ? plan.snapshot() : view3d.snapshot());
+  $('saveBtn').onclick = () => saveFile('yard-plan.json', serialize(true));
+  $('savePng').onclick = () => saveFile('yard-plan.png', $('view3d').hidden ? plan.snapshot() : view3d.snapshot());
   $('openProject').addEventListener('change', async (e) => {
     const f = e.target.files[0];
     e.target.value = '';
     if (!f) return;
     try { applyProject(deserialize(await f.text())); toast('Project opened.'); } catch (err) { toast(err.message); }
   });
-  if (embedded) document.querySelectorAll('.dl').forEach((el) => { el.hidden = true; });
+  if (embedded) {
+    // inside Claude: saving goes through Claude's save dialog, and Claude can read sizes
+    document.querySelectorAll('.dl').forEach((el) => { if (el.id !== 'openProject') el.hidden = true; });
+    document.querySelector('label[for="openProject"]').hidden = false;
+    const use = window.claude?.use;
+    if (use) {
+      use('downloads').then((d) => { if (d) { downloadsApi = d; document.querySelectorAll('.dl').forEach((el) => { el.hidden = el.id === 'openProject'; }); } }).catch(() => {});
+      use('sample').then((f) => { if (f) { sampleApi = f; $('impAsk').hidden = false; } }).catch(() => {});
+    }
+  }
 
   document.addEventListener('keydown', (e) => {
     if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) return;

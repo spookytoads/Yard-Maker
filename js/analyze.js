@@ -166,6 +166,7 @@ function describeComponent(cells, model, canopySat, nearOutside) {
     scanType: guess.type,
     kind: guess.kind || 'scanned',
     origin: 'scanned',
+    autoName: true,
     fixed: guess.fixed,
     locked: false,
     w: round2(w), d: round2(d), h: round2(maxH),
@@ -188,17 +189,19 @@ export function classify(s) {
   const long = Math.max(s.w, s.d), short = Math.min(s.w, s.d);
   if (s.maxH >= HEADROOM) {
     if ((long >= 4 && short <= 0.7) || (long >= 4 && s.fill < 0.3)) {
-      if (s.maxH > 2.6 && s.edgeFrac > 0.3) return { name: 'House wall', type: 'wall', fixed: true };
-      return { name: 'Fence / wall', type: 'fence', fixed: true };
+      if (s.maxH > 2.6 && s.edgeFrac > 0.3) return { name: 'House wall', type: 'wall', kind: 'house', fixed: true };
+      return { name: 'Fence / wall', type: 'fence', kind: 'fence', fixed: true };
     }
-    if (s.area >= 2 && s.fill >= 0.6) return { name: 'Structure', type: 'structure', fixed: true };
-    if (s.canopyNear > 0.25 || s.area < 1.0) return { name: 'Tree', type: 'tree', fixed: true };
-    if (s.area >= 2) return { name: 'Structure', type: 'structure', fixed: true };
+    if (s.area >= 2 && s.fill >= 0.6) return { name: 'Structure', type: 'structure', kind: 'structure', fixed: true };
+    if (s.canopyNear > 0.25 || s.area < 1.0) return { name: 'Tree', type: 'tree', kind: 'tree', fixed: true };
+    if (s.area >= 2) return { name: 'Structure', type: 'structure', kind: 'structure', fixed: true };
     return { name: 'Tall object', type: 'tall', fixed: true };
   }
-  if (long >= 3 && short <= 0.4) return { name: 'Low wall / edging', type: 'edging', fixed: true };
-  if (s.area > 8) return { name: 'Large low feature', type: 'feature', fixed: true };
+  if (long >= 3 && short <= 0.4) return { name: 'Low wall / edging', type: 'edging', kind: 'wall', fixed: true };
+  if (s.area > 8) return { name: 'Large low feature', type: 'feature', kind: 'deck', fixed: true };
   const h = s.maxH, a = s.area;
+  // ragged, see-through outline: a bush rather than something built
+  if (h >= 0.5 && s.fill < 0.55 && a >= 0.3) return { name: 'Shrub?', type: 'shrub', fixed: true, kind: 'shrub' };
   if (h >= 0.6 && h <= 0.95 && a >= 0.6 && a <= 4.5)
     return { name: 'Table?', type: 'table', fixed: false, kind: a > 2 ? 'dining6' : 'bistro' };
   if (h > 0.95 && h <= 1.5 && a >= 0.4 && a <= 1.8)
@@ -228,7 +231,7 @@ export function detectHouseSide(items, model) {
   for (const it of items) {
     if (!it.fixed || it.h < 2.2) continue;
     const r = best === 'top' || best === 'bottom' ? it.w / W : it.d / D;
-    if (r > 0.4 && /wall|Structure/i.test(it.name)) { it.name = 'House'; it.scanType = 'house'; it.isHouse = true; }
+    if (r > 0.4 && /wall|Structure/i.test(it.name)) { it.name = 'House'; it.scanType = 'house'; it.kind = 'house'; it.isHouse = true; }
   }
   return best;
 }

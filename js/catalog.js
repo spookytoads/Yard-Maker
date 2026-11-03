@@ -20,6 +20,8 @@ export const CATEGORIES = {
   garden:  { label: 'Garden',  color: '#4f8a3a' },
   storage: { label: 'Storage', color: '#7d6b5a' },
   water:   { label: 'Water',   color: '#2a9a9a' },
+  plants:  { label: 'Plants',  color: '#2f7a46' },
+  feature: { label: 'Structures', color: '#8a8177' },
   other:   { label: 'Other',   color: '#6b7280' },
 };
 
@@ -75,14 +77,61 @@ export const CATALOG = [
   { kind: 'shed', name: 'Storage shed (8×6)', cat: 'storage', w: 2.4, d: 1.8, h: 2.3, clearance: 0.9,
     rules: { house: [5, 99], edge: 'prefer', level: true },
     why: 'tucked against the back edge, far from the house, on level ground' },
+  // plants
+  { kind: 'tree', name: 'Tree', cat: 'plants', group: 'plants', w: 3.5, d: 3.5, h: 6, clearance: 0.3, shape: 'circle',
+    rules: { house: [4.5, 99], light: 'sun', edge: 'prefer' },
+    why: 'at least 15 ft from the house so roots and branches stay clear, toward the edge where its shade does not cover the lawn' },
+  { kind: 'shrub', name: 'Shrub / bush', cat: 'plants', group: 'plants', w: 1.2, d: 1.2, h: 1.2, clearance: 0.3, shape: 'circle',
+    rules: { edge: 'prefer' },
+    why: 'along the edges and the house to soften the lines' },
+  { kind: 'hedge', name: 'Hedge / privacy row', cat: 'plants', group: 'plants', w: 6, d: 1.0, h: 1.8, clearance: 0.3,
+    rules: { edge: 'prefer' },
+    why: 'along a property line for privacy' },
+  { kind: 'flowerbed', name: 'Flower bed', cat: 'plants', group: 'plants', w: 3, d: 1.2, h: 0.3, clearance: 0.4,
+    rules: { edge: 'prefer', light: 'sun' },
+    why: 'in sun along the edge, framing the lawn' },
+  { kind: 'boulder', name: 'Boulder / rock', cat: 'plants', group: 'plants', w: 1.0, d: 0.8, h: 0.6, clearance: 0.2,
+    rules: { edge: 'prefer' },
+    why: 'as an accent near the edge' },
 ];
+
+/**
+ * Types for things already in the yard that are not furniture or plants. They carry no
+ * placement rules and are fixed by default. Shown with the catalog in every Type menu.
+ */
+export const FEATURES = [
+  { kind: 'house', name: 'House', fixed: true },
+  { kind: 'fence', name: 'Fence', fixed: true },
+  { kind: 'wall', name: 'Wall / retaining wall', fixed: true },
+  { kind: 'structure', name: 'Shed / outbuilding', fixed: true },
+  { kind: 'deck', name: 'Deck / patio', fixed: true },
+  { kind: 'pool', name: 'Pool', fixed: true },
+  { kind: 'utility', name: 'AC unit / utility box', fixed: true },
+  { kind: 'scanned', name: 'Something else', fixed: false },
+];
+export const FEATURE_BY_KIND = Object.fromEntries(FEATURES.map((f) => [f.kind, { ...f, cat: 'feature' }]));
+
+/** Grouped options for a Type menu: [{ label, items: [{ kind, name }] }]. */
+export function typeGroups() {
+  return [
+    { label: 'Furniture', items: CATALOG.filter((c) => c.group !== 'plants' && c.cat !== 'garden') },
+    { label: 'Garden and plants', items: CATALOG.filter((c) => c.group === 'plants' || c.cat === 'garden') },
+    { label: 'Structures and other', items: FEATURES },
+  ];
+}
+
+/** Display name for a kind from either list. */
+export const kindName = (kind) => (CATALOG_BY_KIND[kind] || FEATURE_BY_KIND[kind] || {}).name || '';
+
+/** Kinds that are rooted or built in: a scanned one of these starts out Fixed. */
+export const FIXED_KINDS = new Set(['tree', 'shrub', 'hedge', 'flowerbed', 'boulder', ...FEATURES.filter((f) => f.fixed).map((f) => f.kind)]);
 
 export const CATALOG_BY_KIND = Object.fromEntries(CATALOG.map((c) => [c.kind, c]));
 
 export function categoryOf(item) {
   if (item.cat) return item.cat;
-  const c = CATALOG_BY_KIND[item.kind];
-  return c ? c.cat : 'other';
+  const c = CATALOG_BY_KIND[item.kind] || FEATURE_BY_KIND[item.kind];
+  return c && item.kind !== 'scanned' ? c.cat : 'other';
 }
 
 export function rulesOf(item) {

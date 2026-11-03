@@ -107,23 +107,36 @@
 
     <section class="card">
       <h2><span class="step">3</span>Already in the yard</h2>
-      <p class="hint">Found in the scan. Only things marked <em>Movable</em> get new spots.</p>
+      <p class="hint">Found in the scan. Tap one to say what it is (tree, shrub, table…). Only things marked <em>Movable</em> get new spots.</p>
       <ul id="existingList" class="list"></ul>
     </section>
 
     <section class="card">
-      <h2><span class="step">4</span>Add furniture</h2>
-      <div id="catalog" class="catalog"></div>
-      <details class="more">
-        <summary>Custom piece</summary>
-        <div class="field-grid">
-          <label for="cName">Name</label><input id="cName" type="text" value="Planter box">
-          <label for="cW">Width</label><span class="unit-input"><input id="cW" type="number" value="4" step="0.5" min="0.1"><span class="u">ft</span></span>
-          <label for="cD">Depth</label><span class="unit-input"><input id="cD" type="number" value="2" step="0.5" min="0.1"><span class="u">ft</span></span>
-          <label for="cC">Clearance</label><span class="unit-input"><input id="cC" type="number" value="2" step="0.5" min="0"><span class="u">ft</span></span>
+      <h2><span class="step">4</span>Add furniture and plants</h2>
+      <details class="more import" id="importBox" open>
+        <summary>Import a size or a product</summary>
+        <label for="impText" class="sr">Size, product specs or link</label>
+        <textarea id="impText" rows="3" placeholder='Paste a size like 72" x 40" x 30", the specs copied from a product page, or a link'></textarea>
+        <div class="row">
+          <button type="button" id="impRead" class="btn small">Read size</button>
+          <button type="button" id="impAsk" class="btn small ghost" hidden title="Claude reads the text or link and estimates the size if needed">Ask Claude</button>
         </div>
-        <button type="button" id="customBtn" class="btn small">Add to plan</button>
+        <div id="impStatus" class="status" role="status" aria-live="polite"></div>
+        <div id="impResult" class="imp-result" hidden>
+          <div class="field-grid">
+            <label for="impName">Name</label><input id="impName" type="text">
+            <label for="impKind">Type</label><select id="impKind"></select>
+            <label for="impW">Width</label><span class="unit-input"><input id="impW" type="number" step="0.1" min="0.1"><span class="u">ft</span></span>
+            <label for="impD">Depth</label><span class="unit-input"><input id="impD" type="number" step="0.1" min="0.1"><span class="u">ft</span></span>
+            <label for="impH">Height</label><span class="unit-input"><input id="impH" type="number" step="0.1" min="0"><span class="u">ft</span></span>
+            <label for="impC">Clearance</label><span class="unit-input"><input id="impC" type="number" step="0.5" min="0"><span class="u">ft</span></span>
+            <label for="impRound">Shape</label><span class="check"><input type="checkbox" id="impRound"> round</span>
+          </div>
+          <button type="button" id="impAdd" class="btn small primary">Add to plan</button>
+        </div>
+        <p class="hint">Shopping online? Drag <a id="bmLink" class="bm" href="#">Grab furniture size</a> to your bookmarks bar. Click it on any product page, then paste here. <button type="button" id="bmCopy" class="linkish">Copy the bookmark code</button></p>
       </details>
+      <div id="catalog" class="catalog"></div>
       <ul id="newList" class="list"></ul>
     </section>
   </aside>
@@ -174,7 +187,7 @@
       <h2 id="inspTitle">Selected</h2>
       <div class="field-grid">
         <label for="iName">Name</label><input id="iName" type="text">
-        <label for="iKind">Treat as</label><select id="iKind"></select>
+        <label for="iKind">Type</label><select id="iKind"></select>
         <label for="iW">Width</label><span class="unit-input"><input id="iW" type="number" step="0.1" min="0.1"><span class="u">ft</span></span>
         <label for="iD">Depth</label><span class="unit-input"><input id="iD" type="number" step="0.1" min="0.1"><span class="u">ft</span></span>
         <label for="iC">Clearance</label><span class="unit-input"><input id="iC" type="number" step="0.5" min="0"><span class="u">ft</span></span>
