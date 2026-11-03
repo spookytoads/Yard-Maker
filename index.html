@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Yard Maker</title>
+<meta name="description" content="Turn a Polycam scan of your yard into a measured plan and get furniture layout suggestions that keep the most open space.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..800&family=IBM+Plex+Mono:wght@400;500;600&family=Public+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="css/styles.css">
+<!--APP-START-->
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20" /><path d="M12 3l7 3-7 3" /><path d="M7 21h10" /></svg>
+    <h1>Yard Maker</h1>
+    <span class="source" id="sourcePill">Sample yard</span>
+  </div>
+  <div class="bar-actions">
+    <div class="seg" role="group" aria-label="Units">
+      <button type="button" id="uFt" aria-pressed="true">ft</button>
+      <button type="button" id="uM" aria-pressed="false">m</button>
+    </div>
+    <button type="button" id="copyClaude" class="btn ghost" title="Copy a text summary of the yard and plan to paste into Claude">Copy for Claude</button>
+    <button type="button" id="savePng" class="btn ghost dl">Save image</button>
+    <button type="button" id="saveBtn" class="btn ghost dl">Save project</button>
+    <label class="btn ghost dl" for="openProject">Open</label>
+    <input type="file" id="openProject" accept=".json,application/json" hidden>
+  </div>
+</header>
+
+<main class="app">
+  <aside class="rail rail-left" aria-label="Yard setup">
+    <section class="card">
+      <h2><span class="step">1</span>Load your scan</h2>
+      <label class="drop" id="drop" for="scanFile">
+        <strong>Drop your Polycam export here</strong>
+        <span>or tap to choose files. GLB works best; OBJ + MTL, PLY, STL, FBX or a ZIP of them also work.</span>
+        <input id="scanFile" type="file" multiple accept=".glb,.gltf,.obj,.mtl,.ply,.stl,.fbx,.zip,.jpg,.jpeg,.png,.bin" hidden>
+      </label>
+      <div id="scanStatus" class="status" role="status" aria-live="polite"></div>
+      <details class="more" id="scanOpts">
+        <summary>Scan options</summary>
+        <div class="field-grid">
+          <label for="upAxis">Up axis</label>
+          <select id="upAxis"><option value="y">Y up (Polycam default)</option><option value="z">Z up</option></select>
+          <label for="autoYaw">Straighten</label>
+          <span><input type="checkbox" id="autoYaw" checked> line up with the fences</span>
+          <label for="yawExtra">Turn plan</label>
+          <span class="unit-input"><input type="number" id="yawExtra" value="0" step="90"><span>°</span></span>
+          <label for="scaleIn">Scale</label>
+          <span class="unit-input"><input type="number" id="scaleIn" value="1" step="0.01" min="0.01"><span>×</span></span>
+        </div>
+        <button type="button" id="reanalyze" class="btn small" disabled>Re-measure scan</button>
+      </details>
+      <details class="more" id="manualBox">
+        <summary>No scan? Enter the size</summary>
+        <div class="field-grid">
+          <label for="manW">Width</label>
+          <span class="unit-input"><input type="number" id="manW" value="50" min="3" step="1"><span class="u">ft</span></span>
+          <label for="manD">Depth</label>
+          <span class="unit-input"><input type="number" id="manD" value="35" min="3" step="1"><span class="u">ft</span></span>
+        </div>
+        <div class="row">
+          <button type="button" id="manualBtn" class="btn small">Use this size</button>
+          <button type="button" id="sampleBtn" class="btn small ghost">Load the sample yard</button>
+        </div>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2><span class="step">2</span>Your yard</h2>
+      <dl class="stats" id="yardStats"></dl>
+      <div class="field-grid">
+        <label for="houseSide">House side</label>
+        <select id="houseSide">
+          <option value="top">Top of plan</option><option value="bottom">Bottom of plan</option>
+          <option value="left">Left of plan</option><option value="right">Right of plan</option>
+          <option value="none">No house</option>
+        </select>
+      </div>
+      <div class="row">
+        <button type="button" class="btn small tool" id="doorTool" aria-pressed="false">Set door</button>
+        <button type="button" class="btn small tool" id="measureTool" aria-pressed="false">Measure</button>
+      </div>
+      <div class="row">
+        <label class="btn small ghost" for="bgFile" title="An aerial or satellite screenshot of the yard, stretched to the yard's outline">Background photo</label>
+        <input type="file" id="bgFile" accept="image/*" hidden>
+        <button type="button" class="btn small ghost" id="bgClear" hidden>Remove background</button>
+      </div>
+      <div id="calib" class="calib" hidden>
+        <p>Measured <strong id="calibMeasured"></strong>. If you know the real length, enter it to correct the scan's scale.</p>
+        <div class="row">
+          <span class="unit-input"><input type="number" id="calibLen" step="0.1" min="0.1" aria-label="Real length"><span class="u">ft</span></span>
+          <button type="button" id="calibBtn" class="btn small">Rescale</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2><span class="step">3</span>Already in the yard</h2>
+      <p class="hint">Found in the scan. Only things marked <em>Movable</em> get new spots.</p>
+      <ul id="existingList" class="list"></ul>
+    </section>
+
+    <section class="card">
+      <h2><span class="step">4</span>Add furniture</h2>
+      <div id="catalog" class="catalog"></div>
+      <details class="more">
+        <summary>Custom piece</summary>
+        <div class="field-grid">
+          <label for="cName">Name</label><input id="cName" type="text" value="Planter box">
+          <label for="cW">Width</label><span class="unit-input"><input id="cW" type="number" value="4" step="0.5" min="0.1"><span class="u">ft</span></span>
+          <label for="cD">Depth</label><span class="unit-input"><input id="cD" type="number" value="2" step="0.5" min="0.1"><span class="u">ft</span></span>
+          <label for="cC">Clearance</label><span class="unit-input"><input id="cC" type="number" value="2" step="0.5" min="0"><span class="u">ft</span></span>
+        </div>
+        <button type="button" id="customBtn" class="btn small">Add to plan</button>
+      </details>
+      <ul id="newList" class="list"></ul>
+    </section>
+  </aside>
+
+  <section class="stage" aria-label="Yard plan">
+    <div class="stage-bar">
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" id="tabPlan" aria-selected="true">Plan</button>
+        <button type="button" role="tab" id="tab3d" aria-selected="false">3D</button>
+      </div>
+      <div class="layers" id="layers">
+        <label><input type="checkbox" data-layer="photo" checked> Photo</label>
+        <label><input type="checkbox" data-layer="shade" checked> Shade</label>
+        <label><input type="checkbox" data-layer="heights"> Heights</label>
+        <label><input type="checkbox" data-layer="clearance" checked> Clearance</label>
+        <label><input type="checkbox" data-layer="textures" checked> Textures</label>
+      </div>
+      <div class="zoom">
+        <button type="button" id="zoomOut" aria-label="Zoom out">−</button>
+        <button type="button" id="zoomFit">Fit</button>
+        <button type="button" id="zoomIn" aria-label="Zoom in">+</button>
+      </div>
+    </div>
+    <div class="canvas-wrap" id="planWrap">
+      <canvas id="plan" aria-label="Top-down plan of the yard"></canvas>
+      <div class="tool-hint" id="toolHint" hidden></div>
+    </div>
+    <div class="canvas-wrap" id="view3d" hidden></div>
+    <p class="stage-foot">Drag pieces to move them. <kbd>R</kbd> turns the selected piece, <kbd>Del</kbd> removes it. Scroll or pinch to zoom.</p>
+  </section>
+
+  <aside class="rail rail-right" aria-label="Suggestions">
+    <section class="card suggest">
+      <h2><span class="step">5</span>Layout suggestions</h2>
+      <p class="hint">Finds spots for every movable piece: safe distances, clear paths from the door, and the biggest open lawn left over.</p>
+      <button type="button" id="suggestBtn" class="btn primary wide">Suggest a layout</button>
+      <div class="progress" id="progress" hidden><div></div></div>
+      <div id="metrics" class="metrics"></div>
+      <div class="row" id="proposalActions" hidden>
+        <button type="button" id="applyBtn" class="btn primary">Apply all</button>
+        <button type="button" id="anotherBtn" class="btn">Try another</button>
+        <button type="button" id="discardBtn" class="btn ghost">Discard</button>
+      </div>
+      <ol id="notes" class="notes"></ol>
+    </section>
+
+    <section class="card" id="inspector" hidden>
+      <h2 id="inspTitle">Selected</h2>
+      <div class="field-grid">
+        <label for="iName">Name</label><input id="iName" type="text">
+        <label for="iKind">Treat as</label><select id="iKind"></select>
+        <label for="iW">Width</label><span class="unit-input"><input id="iW" type="number" step="0.1" min="0.1"><span class="u">ft</span></span>
+        <label for="iD">Depth</label><span class="unit-input"><input id="iD" type="number" step="0.1" min="0.1"><span class="u">ft</span></span>
+        <label for="iC">Clearance</label><span class="unit-input"><input id="iC" type="number" step="0.5" min="0"><span class="u">ft</span></span>
+      </div>
+      <p class="hint" id="iInfo"></p>
+      <div class="look" id="lookBox">
+        <h3>Look</h3>
+        <div class="look-grid">
+          <figure class="look-photo" id="iPhotoFig">
+            <img id="iPhoto" alt="">
+            <figcaption id="iPhotoCap">No photo yet</figcaption>
+          </figure>
+          <div class="look-ctl">
+            <label class="btn small" for="iPhotoFile">Add product photo</label>
+            <input type="file" id="iPhotoFile" accept="image/*" hidden>
+            <label for="iFinish" class="sr">Finish</label>
+            <select id="iFinish">
+              <option value="auto">Finish: automatic</option>
+              <option value="wood">Wood</option><option value="teak">Teak</option>
+              <option value="wicker">Wicker</option><option value="metal">Black metal</option>
+              <option value="stone">Stone</option><option value="fabric">Cushion fabric</option>
+              <option value="custom">My texture photo</option>
+            </select>
+            <label class="btn small ghost" for="iTexFile">Upload texture photo</label>
+            <input type="file" id="iTexFile" accept="image/*" hidden>
+            <label class="check"><input type="checkbox" id="iCutout"> Show photo as a cutout in 3D</label>
+            <button type="button" class="btn small ghost" id="iClearLook">Remove photos</button>
+          </div>
+        </div>
+      </div>
+      <div class="row wrap">
+        <button type="button" class="btn small" id="iRotate">Turn 90°</button>
+        <button type="button" class="btn small" id="iLock" aria-pressed="false">Lock in place</button>
+        <button type="button" class="btn small" id="iFixed" aria-pressed="false">Mark movable</button>
+        <button type="button" class="btn small danger" id="iDelete">Remove</button>
+      </div>
+    </section>
+  </aside>
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<script type="module" src="js/main.js"></script>
+<!--APP-END-->
+</body>
+</html>

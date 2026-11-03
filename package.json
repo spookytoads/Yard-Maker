@@ -1,0 +1,14 @@
+{
+  "name": "yard-maker",
+  "private": true,
+  "type": "module",
+  "description": "Turn a Polycam yard scan into a measured plan with furniture layout suggestions.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "serve": "python3 -m http.server 8000",
+    "build:artifact": "node scripts/build-artifact.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}
